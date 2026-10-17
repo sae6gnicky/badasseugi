@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>바른 글씨 연습 플랫폼</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        @font-face {
+            font-family: 'Badasseugi';
+            src: url('https://fonts.gstatic.com/s/nanumgothic/v17/PN_oR5YC-zu_SogS7V-H_15Tjuat.woff2') format('woff2');
+            font-weight: normal; font-style: normal;
+        }
+        
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f8fafc; margin: 0; padding: 0; }
+        
+        .svg-practice-text {
+            fill: #e2e8f0;
+            dominant-baseline: middle;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+
+        .print-container {
+            background-color: white;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            margin: 0 auto 30px auto;
+            position: relative;
+            box-sizing: border-box;
+            flex-shrink: 0;
+            border: 1px solid #b0b8c0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* A4 가로 고정 및 여백 최적화 (하단 잘림 방지) */
+        .landscape { 
+            width: 297mm; 
+            height: 210mm; 
+            padding: 15mm 15mm 15mm 15mm; /* 상하좌우 15mm 균형 여백 */
+        }
+
+        .dot-line-h { position: absolute; top: 50%; left: 0; width: 100%; border-top: 1px dashed #cbd5e1; transform: translateY(-50%); z-index: 5; pointer-events: none; }
+        .dot-line-v { position: absolute; left: 50%; top: 0; height: 100%; border-left: 1px dashed #cbd5e1; transform: translateX(-50%); z-index: 5; pointer-events: none; }
+
+        #loading-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.95);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+
+        .shape-svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .grid-wrapper {
+            position: relative;
+            overflow: visible;
+        }
+
+        .check-mark-container {
+            position: absolute;
+            right: -45px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 40px; 
+            height: 40px;
+            z-index: 20;
+        }
+
+        @media print {
+            body { background: none; padding: 0; margin: 0; }
+            .print-container { 
+                box-shadow: none; 
+                margin: 0; 
+                border: none; 
+                page-break-after: always; 
+                page-break-inside: avoid;
+                display: flex !important; 
+            }
+            @page { size: A4 landscape; margin: 0; }
+            #mainContent { padding: 0 !important; background: none !important; }
+        }
+    </style>
+    <style id="dynamic-font-style"></style>
+</head>
+<body class="h-screen flex flex-col md:flex-row overflow-hidden text-slate-800">
+    <div id="loading-overlay">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-teal-600 mb-6"></div>
+        <p class="text-teal-700 font-bold text-xl">고해상도 이미지 생성 중...</p>
+        <p class="text-slate-400 text-sm mt-2">인쇄용 레이아웃을 구성하고 있습니다.</p>
+    </div>
+
+    <aside class="w-full md:w-80 lg:w-96 bg-white border-r border-slate-200 flex flex-col shadow-xl z-50 h-full">
+        <div class="p-4 border-b border-slate-100">
+            <h1 class="text-xl font-bold text-teal-600 flex items-center gap-2">
+                <span class="text-2xl">✏</span> 바른 글씨 연습
+            </h1>
+        </div>
+        
+        <div class="p-4 flex-1 flex flex-col min-h-0 space-y-4">
+            <div class="flex-1 flex flex-col min-h-0 space-y-1">
+                <label class="block text-xs font-bold text-slate-700">1. 연습 문장 입력 (가로 15칸 × 세로 10칸)</label>
+                <textarea id="textInput" class="w-full flex-1 p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 text-sm transition-all resize-none shadow-sm"></textarea>
+            </div>
+
+            <div class="space-y-1">
+                <label class="block text-xs font-bold text-slate-700">2. 폰트 업로드 (인쇄 반영용)</label>
+                <input type="file" id="fontUpload" accept=".ttf, .otf, .woff, .woff2" class="hidden">
+                <label for="fontUpload" class="cursor-pointer flex items-center justify-center gap-2 w-full py-2 border-2 border-dashed border-slate-300 rounded-xl text-xs text-slate-500 hover:border-teal-500 hover:text-teal-600 hover:bg-teal-50 transition-all">
+                    <span id="fontName">파일 선택 (기본폰트)</span>
+                </label>
+            </div>
+        </div>
+
+        <div class="p-4 border-t border-slate-100 bg-slate-50">
+            <button onclick="exportToImage()" class="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-sm">
+                <span>인쇄 이미지 생성</span>
+            </button>
+        </div>
+    </aside>
+
+    <main id="mainContent" class="flex-1 overflow-auto p-4 md:p-12 flex flex-col items-center bg-slate-200">
+    </main>
+
+    <script>
+        const state = {
+            text: '어제는 비가 왔다. 그리고 오늘 하늘은 맑다.',
+            customFontData: null,
+            fontFamilyName: 'Badasseugi'
+        };
+
+        const JUNG_RIGHT = [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 14, 15, 16, 19, 20];
+        const JUNG_BOTTOM = [8, 12, 13, 17, 18];
+        const JONG_DOUBLE = [2, 3, 5, 6, 9, 10, 11, 12, 13, 14, 15, 18, 20];
+
+        let globalQuoteOpen = false;
+
+        window.onload = () => {
+            document.getElementById('textInput').value = state.text;
+            renderGrid();
+        };
+
+        document.getElementById('fontUpload').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async function(event) {
+                state.customFontData = event.target.result;
+                state.fontFamilyName = 'CustomFont';
+                const fontCss = `@font-face { font-family: 'CustomFont'; src: url('${state.customFontData}') format('${file.name.endsWith('woff2') ? 'woff2' : 'truetype'}'); font-weight: normal; font-style: normal; }`;
+                document.getElementById('dynamic-font-style').innerText = fontCss;
+                document.getElementById('fontName').textContent = file.name;
+                try {
+                    await document.fonts.load('1em CustomFont');
+                    setTimeout(renderGrid, 500);
+                } catch(e) { renderGrid(); }
+            };
+            reader.readAsDataURL(file);
+        });
+
+        function analyzeChar(char) {
+            const code = char.charCodeAt(0);
+            if (code >= 0xAC00 && code <= 0xD7A3) {
+                const offset = code - 0xAC00;
+                const jungIdx = Math.floor((offset % 588) / 28);
+                const jongIdx = offset % 28;
+
+                if (jongIdx === 0) {
+                    if (JUNG_RIGHT.includes(jungIdx)) return 'vertical-triangle';
+                    return 'triangle';
+                } else {
+                    if (JONG_DOUBLE.includes(jongIdx)) return 'square';
+                    if (JUNG_BOTTOM.includes(jungIdx) && !JONG_DOUBLE.includes(jongIdx)) return 'diamond';
+                    if (JUNG_RIGHT.includes(jungIdx)) return 'trapezoid-right-long'; 
+                    return 'diamond';
+                }
+            }
+            if (/[A-Za-z0-9]/.test(char)) return 'square';
+            return 'none';
+        }
+
+        function parseTextToCells(paragraph) {
+            const cells = [];
+            cells.push({ char: '', type: 'space', shape: 'none' });
+            const cleanedPara = paragraph.replace(/([.,])\s+/g, '$1');
+
+            let i = 0;
+            while(i < cleanedPara.length) {
+                const char = cleanedPara[i];
+                if (/[.,]/.test(char)) {
+                    cells.push({ char: char, type: 'symbol', shape: 'none' });
+                } else if (char === '"' || char === '“' || char === '”') {
+                    cells.push({ char: char, type: 'quote', subType: globalQuoteOpen ? 'close' : 'open', shape: 'none' });
+                    globalQuoteOpen = !globalQuoteOpen;
+                } else if (char === '!' || char === '?') {
+                    cells.push({ char: char, type: 'full-symbol', shape: 'none' });
+                } else if (char === ' ') {
+                    cells.push({ char: '', type: 'space', shape: 'none' });
+                } else if (/[a-zA-Z0-9]/.test(char)) {
+                    cells.push({ char: char, type: 'half-char', shape: analyzeChar(char) });
+                } else {
+                    cells.push({ char: char, type: 'hangul', shape: analyzeChar(char) });
+                }
+                i++;
+            }
+            return cells;
+        }
+
+        function createNewPage() {
+            const paper = document.createElement('div');
+            paper.className = `print-container landscape page-to-capture`;
+            paper.innerHTML = `
+                <div class="w-full flex justify-between items-end border-b-2 border-slate-800 pb-2 mb-4">
+                    <h2 class="text-2xl font-black text-slate-800 tracking-tight">바른 글씨 연습장</h2>
+                    <div class="flex gap-4 text-[12px] font-bold text-slate-600">
+                        <div class="flex items-center gap-1">번호: <div class="border-b border-slate-300 w-20 h-4"></div></div>
+                        <div class="flex items-center gap-1">이름: <div class="border-b border-slate-300 w-20 h-4"></div></div>
+                    </div>
+                </div>
+                <div class="grid-wrapper w-full" style="border-top: 1.5px solid #b0b8c0; border-left: 1.5px solid #b0b8c0; background: #fff;"></div>
+            `;
+            document.getElementById('mainContent').appendChild(paper);
+            return paper.querySelector('.grid-wrapper');
+        }
+
+        function renderGrid() {
+            const main = document.getElementById('mainContent');
+            main.innerHTML = '';
+            
+            const cols = 15;
+            const maxRowsPerPage = 10;
+            // 격자 크기를 64px로 줄여 하단 여백 확보
+            const size = 64;
+
+            let currentGrid = createNewPage();
+            currentGrid.style.display = 'grid';
+            currentGrid.style.gridTemplateColumns = `repeat(${cols}, ${size}px)`;
+
+            let currentRowCount = 0;
+            globalQuoteOpen = false;
+
+            const paragraphs = state.text
+                .replace(/([.?!][”'"]*)\s+/g, "$1\n") 
+                .split('\n')
+                .filter(p => p.trim() !== "");
+
+            paragraphs.forEach(para => {
+                const rawCells = parseTextToCells(para);
+                
+                let processedCells = [];
+                for(let i=0; i < rawCells.length; i++) {
+                    const c = rawCells[i];
+                    if(c.type === 'half-char') {
+                        const next = rawCells[i+1];
+                        if(next && next.type === 'half-char') {
+                            processedCells.push({ type: 'combined-half', chars: [c, next], shape: 'none' });
+                            i++;
+                        } else {
+                            processedCells.push({ type: 'single-half', charObj: c, shape: 'none' });
+                        }
+                    } else {
+                        processedCells.push(c);
+                    }
+                }
+
+                let finalCells = [];
+                for (let i = 0; i < processedCells.length; i++) {
+                    const c = processedCells[i];
+                    if (finalCells.length % cols === 0 && c.type === 'space' && finalCells.length > 0) continue; 
+                    finalCells.push(c);
+                    if (finalCells.length % cols === 0) {
+                        const next = processedCells[i+1];
+                        if (next && next.type === 'space') {
+                            finalCells[finalCells.length - 1].hasExternalCheck = true;
+                            i++; 
+                        }
+                    }
+                }
+
+                let rows = [];
+                for (let i = 0; i < finalCells.length; i += cols) {
+                    let row = finalCells.slice(i, i + cols);
+                    while (row.length < cols) row.push({ type: 'empty' });
+                    rows.push(row);
+                }
+
+                const renderStep = (showText) => {
+                    rows.forEach(row => {
+                        if (currentRowCount + 1 > maxRowsPerPage) {
+                            currentGrid = createNewPage();
+                            currentGrid.style.display = 'grid';
+                            currentGrid.style.gridTemplateColumns = `repeat(${cols}, ${size}px)`;
+                            currentRowCount = 0;
+                        }
+                        row.forEach(c => currentGrid.appendChild(createCell(c, size, showText)));
+                        currentRowCount++;
+                    });
+                };
+
+                renderStep(true); 
+                renderStep(false); 
+            });
+        }
+
+        function createCell(data, s, showText) {
+            const cell = document.createElement('div');
+            cell.className = 'relative box-border bg-white overflow-visible';
+            cell.style.width = `${s}px`; cell.style.height = `${s}px`;
+            cell.style.borderRight = '1.5px solid #b0b8c0'; 
+            cell.style.borderBottom = '1.5px solid #b0b8c0';
+
+            const hLine = document.createElement('div'); hLine.className = 'dot-line-h'; cell.appendChild(hLine);
+            const vLine = document.createElement('div'); vLine.className = 'dot-line-v'; cell.appendChild(vLine);
+
+            if (data.hasExternalCheck) {
+                const checkDiv = document.createElement('div');
+                checkDiv.className = 'check-mark-container';
+                const svgNS = "http://www.w3.org/2000/svg";
+                const checkSvg = document.createElementNS(svgNS, "svg");
+                checkSvg.setAttribute("viewBox", "0 0 100 100");
+                const path = document.createElementNS(svgNS, "path");
+                path.setAttribute("d", "M20,50 L45,75 L85,25");
+                path.setAttribute("fill", "none");
+                path.setAttribute("stroke", "#f97316"); 
+                path.setAttribute("stroke-width", "10");
+                path.setAttribute("stroke-linecap", "round");
+                checkSvg.appendChild(path);
+                checkDiv.appendChild(checkSvg);
+                cell.appendChild(checkDiv);
+            }
+
+            const svgNS = "http://www.w3.org/2000/svg";
+            const svg = document.createElementNS(svgNS, "svg");
+            svg.setAttribute("viewBox", "0 0 100 100");
+            svg.classList.add("shape-svg");
+            
+            const style = document.createElementNS(svgNS, "style");
+            const fontRule = document.getElementById('dynamic-font-style').innerText;
+            style.textContent = `
+                ${fontRule}
+                .svg-practice-text { font-family: '${state.fontFamilyName}', 'Noto Sans KR', sans-serif !important; }
+            `;
+            svg.appendChild(style);
+
+            const drawShape = (shapeType, container, customXOffset = 0, isHalf = false) => {
+                if (!shapeType || shapeType === 'none') return;
+                const path = document.createElementNS(svgNS, "path");
+                path.setAttribute("fill", "none");
+                path.setAttribute("stroke", "#ccfbf1");
+                path.setAttribute("stroke-width", isHalf ? "2.4" : "1.2");
+                let d = "";
+                const m = 4; const e = 96; const mid = 50;
+
+                if (shapeType === 'vertical-triangle') {
+                    d = `M${m},${mid} L${e},${m} L${e},${e} Z`;
+                } else if (shapeType === 'triangle') {
+                    d = `M${mid},${m} L${e},${e} L${m},${e} Z`;
+                } else if (shapeType === 'diamond') {
+                    d = `M${mid},${m} L${e},${mid} L${mid},${e} L${m},${mid} Z`;
+                } else if (shapeType === 'trapezoid-right-long') {
+                    d = `M${m},${m+15} L${e},${m} L${e},${e} L${m},${e-15} Z`;
+                } else if (shapeType === 'square') {
+                    const sqM = 8; const sqE = 92;
+                    d = `M${sqM},${sqM} H${sqE} V${sqE} H${sqM} Z`;
+                }
+                
+                path.setAttribute("d", d);
+                if(isHalf) path.setAttribute("transform", `translate(${customXOffset === 0 ? -25 : 25}, 0) scale(0.5, 1)`);
+                container.appendChild(path);
+            };
+
+            const drawText = (char, container, x="50", y="52", fontSize="85", isHalf=false) => {
+                if(!showText || !char) return;
+                const text = document.createElementNS(svgNS, "text");
+                text.textContent = char;
+                text.classList.add("svg-practice-text");
+                text.setAttribute("x", x);
+                text.setAttribute("y", y);
+                text.setAttribute("font-size", fontSize);
+                if(isHalf) text.setAttribute("transform", `scale(0.8, 1) translate(${(parseFloat(x)-50)*0.25}, 0)`);
+                container.appendChild(text);
+            };
+
+            if (data.type === 'combined-half') {
+                drawShape(data.chars[0].shape, svg, 0, true);
+                drawShape(data.chars[1].shape, svg, 50, true);
+                drawText(data.chars[0].char, svg, "25", "52", "75", true);
+                drawText(data.chars[1].char, svg, "75", "52", "75", true);
+            } else if (data.type === 'single-half') {
+                drawShape(data.charObj.shape, svg, 0, true);
+                drawText(data.charObj.char, svg, "25", "52", "75", true);
+            } else if (data.type !== 'empty') {
+                drawShape(data.shape, svg);
+                if (data.char) {
+                    let x="50", y="52", fs="85";
+                    if (data.type === 'quote') { fs="70"; y="40"; x=data.subType === 'open' ? "70" : "30"; }
+                    else if (data.type === 'symbol') { x="25"; y="75"; }
+                    drawText(data.char, svg, x, y, fs);
+                }
+            }
+            
+            cell.appendChild(svg);
+            return cell;
+        }
+
+        async function exportToImage() {
+            const loading = document.getElementById('loading-overlay');
+            loading.style.display = 'flex';
+            await document.fonts.ready;
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            try {
+                const pages = document.querySelectorAll('.page-to-capture');
+                const images = [];
+                for (const page of pages) {
+                    const canvas = await html2canvas(page, { 
+                        scale: 3, 
+                        useCORS: true, 
+                        allowTaint: true, 
+                        backgroundColor: '#ffffff', 
+                        logging: false,
+                        onclone: (clonedDoc) => {
+                            const style = clonedDoc.createElement('style');
+                            style.innerText = document.getElementById('dynamic-font-style').innerText;
+                            clonedDoc.head.appendChild(style);
+                        }
+                    });
+                    images.push(canvas.toDataURL('image/png'));
+                }
+                const printWindow = window.open('', '_blank');
+                printWindow.document.write(`
+                    <html>
+                    <head>
+                        <title>바른 글씨 연습장 인쇄 미리보기</title>
+                        <style>
+                            @page { size: A4 landscape; margin: 0; }
+                            body { margin: 0; background: #525659; display: flex; flex-direction: column; align-items: center; padding: 40px 0; font-family: sans-serif; }
+                            .page-img { background: white; box-shadow: 0 0 20px rgba(0,0,0,0.3); margin-bottom: 20px; width: 297mm; display: block; }
+                            .controls { position: fixed; top: 20px; right: 20px; z-index: 100; background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+                            button { padding: 12px 24px; background: #0d9488; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+                            @media print { 
+                                .controls { display: none; } 
+                                body { background: none; padding: 0; }
+                                .page-img { box-shadow: none; margin: 0; width: 100%; height: auto; page-break-after: always; display: block; } 
+                            }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="controls"><button onclick="window.print()">인쇄 / PDF 저장</button></div>
+                        ${images.map(img => `<img src="${img}" class="page-img">`).join('')}
+                    </body></html>
+                `);
+                printWindow.document.close();
+            } catch (err) { alert("이미지 생성 중 오류가 발생했습니다."); }
+            finally { loading.style.display = 'none'; }
+        }
+
+        document.getElementById('textInput').addEventListener('input', (e) => { state.text = e.target.value; renderGrid(); });
+    </script>
+</body>
+</html>
