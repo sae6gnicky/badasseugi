@@ -10,7 +10,7 @@
     <style>
         @font-face {
             font-family: 'Badasseugi';
-            src: url('https://fonts.gstatic.com/s/nanumgothic/v17/PN_oR5YC-zu_SogS7V-H_15Tjuat.woff2') format('woff2');
+            src: url('https://raw.githubusercontent.com/sae6gnicky/badasseugi/main/Hakgyoansim%20Badasseugi%20TTF%20L.ttf') format('truetype');
             font-weight: normal; font-style: normal;
         }
         
@@ -121,7 +121,7 @@
                 <label class="block text-xs font-bold text-slate-700">2. 폰트 업로드 (인쇄 반영용)</label>
                 <input type="file" id="fontUpload" accept=".ttf, .otf, .woff, .woff2" class="hidden">
                 <label for="fontUpload" class="cursor-pointer flex items-center justify-center gap-2 w-full py-2 border-2 border-dashed border-slate-300 rounded-xl text-xs text-slate-500 hover:border-teal-500 hover:text-teal-600 hover:bg-teal-50 transition-all">
-                    <span id="fontName">파일 선택 (기본폰트)</span>
+                    <span id="fontName">학교안심 받아쓰기 (기본폰트)</span>
                 </label>
             </div>
         </div>
@@ -137,8 +137,10 @@
     </main>
 
     <script>
+        const DEFAULT_FONT_URL = 'https://raw.githubusercontent.com/sae6gnicky/badasseugi/main/Hakgyoansim%20Badasseugi%20TTF%20L.ttf';
+
         const state = {
-            text: '어제는 비가 왔다. 그리고 오늘 하늘은 맑다.',
+            text: '"어제는 비가 왔다." 그리고 오늘 하늘은 맑다.',
             customFontData: null,
             fontFamilyName: 'Badasseugi'
         };
@@ -147,11 +149,35 @@
         const JUNG_BOTTOM = [8, 12, 13, 17, 18];
         const JONG_DOUBLE = [2, 3, 5, 6, 9, 10, 11, 12, 13, 14, 15, 18, 20];
 
-        let globalQuoteOpen = false;
+        let globalDoubleQuoteOpen = false;
+        let globalSingleQuoteOpen = false;
+
+        // 기본 폰트를 Base64로 미리 불러와 SVG 및 html2canvas 인쇄 시 깨짐 방지
+        async function loadDefaultFont() {
+            try {
+                const response = await fetch(DEFAULT_FONT_URL);
+                const blob = await response.blob();
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                    if (!state.customFontData) {
+                        const base64data = reader.result;
+                        const fontCss = `@font-face { font-family: 'Badasseugi'; src: url('${base64data}') format('truetype'); font-weight: normal; font-style: normal; }`;
+                        document.getElementById('dynamic-font-style').innerText = fontCss;
+                        await document.fonts.load('1em Badasseugi');
+                        renderGrid();
+                    }
+                };
+                reader.readAsDataURL(blob);
+            } catch (e) {
+                console.warn('기본 폰트 로드 실패, CSS 폴백 사용:', e);
+                renderGrid();
+            }
+        }
 
         window.onload = () => {
             document.getElementById('textInput').value = state.text;
             renderGrid();
+            loadDefaultFont();
         };
 
         document.getElementById('fontUpload').addEventListener('change', function(e) {
@@ -196,16 +222,28 @@
         function parseTextToCells(paragraph) {
             const cells = [];
             cells.push({ char: '', type: 'space', shape: 'none' });
-            const cleanedPara = paragraph.replace(/([.,])\s+/g, '$1');
+            // 마침표, 쉼표 단독이거나 그 뒤에 닫는 따옴표가 이어진 뒤 공백이 올 경우 공백 제거 (원고지 규칙)
+            const cleanedPara = paragraph.replace(/([.,][”"’']*)\s+/g, '$1');
 
             let i = 0;
             while(i < cleanedPara.length) {
                 const char = cleanedPara[i];
                 if (/[.,]/.test(char)) {
                     cells.push({ char: char, type: 'symbol', shape: 'none' });
-                } else if (char === '"' || char === '“' || char === '”') {
-                    cells.push({ char: char, type: 'quote', subType: globalQuoteOpen ? 'close' : 'open', shape: 'none' });
-                    globalQuoteOpen = !globalQuoteOpen;
+                } else if (char === '“' || char === '‘') {
+                    cells.push({ char: char, type: 'quote', subType: 'open', shape: 'none' });
+                    if (char === '“') globalDoubleQuoteOpen = true;
+                    if (char === '‘') globalSingleQuoteOpen = true;
+                } else if (char === '”' || char === '’') {
+                    cells.push({ char: char, type: 'quote', subType: 'close', shape: 'none' });
+                    if (char === '”') globalDoubleQuoteOpen = false;
+                    if (char === '’') globalSingleQuoteOpen = false;
+                } else if (char === '"') {
+                    cells.push({ char: char, type: 'quote', subType: globalDoubleQuoteOpen ? 'close' : 'open', shape: 'none' });
+                    globalDoubleQuoteOpen = !globalDoubleQuoteOpen;
+                } else if (char === "'") {
+                    cells.push({ char: char, type: 'quote', subType: globalSingleQuoteOpen ? 'close' : 'open', shape: 'none' });
+                    globalSingleQuoteOpen = !globalSingleQuoteOpen;
                 } else if (char === '!' || char === '?') {
                     cells.push({ char: char, type: 'full-symbol', shape: 'none' });
                 } else if (char === ' ') {
@@ -251,10 +289,11 @@
             currentGrid.style.gridTemplateColumns = `repeat(${cols}, ${size}px)`;
 
             let currentRowCount = 0;
-            globalQuoteOpen = false;
+            globalDoubleQuoteOpen = false;
+            globalSingleQuoteOpen = false;
 
             const paragraphs = state.text
-                .replace(/([.?!][”'"]*)\s+/g, "$1\n") 
+                .replace(/([.?!][”'"’]*)\s+/g, "$1\n") 
                 .split('\n')
                 .filter(p => p.trim() !== "");
 
@@ -264,8 +303,19 @@
                 let processedCells = [];
                 for(let i=0; i < rawCells.length; i++) {
                     const c = rawCells[i];
-                    if(c.type === 'half-char') {
-                        const next = rawCells[i+1];
+                    const next = rawCells[i+1];
+
+                    // 1. 마침표(.)나 쉼표(,) 뒤에 닫는 따옴표(", ”, ', ’)가 오면 한 칸에 합침
+                    if (c.type === 'symbol' && next && next.type === 'quote' && next.subType === 'close') {
+                        processedCells.push({
+                            type: 'symbol-quote',
+                            chars: [c.char, next.char],
+                            shape: 'none'
+                        });
+                        i++;
+                    }
+                    // 2. 영문/숫자 반 칸 합침 처리
+                    else if (c.type === 'half-char') {
                         if(next && next.type === 'half-char') {
                             processedCells.push({ type: 'combined-half', chars: [c, next], shape: 'none' });
                             i++;
@@ -395,7 +445,11 @@
                 container.appendChild(text);
             };
 
-            if (data.type === 'combined-half') {
+            if (data.type === 'symbol-quote') {
+                // 한 칸에 마침표(왼쪽 아래 반 칸) + 닫는 따옴표(오른쪽 위 반 칸) 함께 배치
+                drawText(data.chars[0], svg, "25", "75", "85");
+                drawText(data.chars[1], svg, "70", "40", "70");
+            } else if (data.type === 'combined-half') {
                 drawShape(data.chars[0].shape, svg, 0, true);
                 drawShape(data.chars[1].shape, svg, 50, true);
                 drawText(data.chars[0].char, svg, "25", "52", "75", true);
