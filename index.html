@@ -8,12 +8,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        @font-face {
-            font-family: 'Badasseugi';
-            src: url('https://raw.githubusercontent.com/sae6gnicky/badasseugi/main/Hakgyoansim%20Badasseugi%20TTF%20L.ttf') format('truetype');
-            font-weight: normal; font-style: normal;
-        }
-        
         body { font-family: 'Noto Sans KR', sans-serif; background-color: #f8fafc; margin: 0; padding: 0; }
         
         .svg-practice-text {
@@ -40,7 +34,7 @@
         .landscape { 
             width: 297mm; 
             height: 210mm; 
-            padding: 15mm 15mm 15mm 15mm; /* 상하좌우 15mm 균형 여백 */
+            padding: 15mm 15mm 15mm 15mm;
         }
 
         .dot-line-h { position: absolute; top: 50%; left: 0; width: 100%; border-top: 1px dashed #cbd5e1; transform: translateY(-50%); z-index: 5; pointer-events: none; }
@@ -95,7 +89,16 @@
             #mainContent { padding: 0 !important; background: none !important; }
         }
     </style>
-    <style id="dynamic-font-style"></style>
+    <style id="dynamic-font-style">
+        @font-face {
+            font-family: 'Badasseugi';
+            src: url('https://cdn.jsdelivr.net/gh/sae6gnicky/badasseugi@main/Hakgyoansim%20Badasseugi%20TTF%20L.ttf') format('truetype');
+            font-weight: normal; font-style: normal;
+        }
+        .svg-practice-text {
+            font-family: 'Badasseugi', 'Noto Sans KR', sans-serif !important;
+        }
+    </style>
 </head>
 <body class="h-screen flex flex-col md:flex-row overflow-hidden text-slate-800">
     <div id="loading-overlay">
@@ -137,7 +140,10 @@
     </main>
 
     <script>
-        const DEFAULT_FONT_URL = 'https://raw.githubusercontent.com/sae6gnicky/badasseugi/main/Hakgyoansim%20Badasseugi%20TTF%20L.ttf';
+        const DEFAULT_FONT_URLS = [
+            'https://cdn.jsdelivr.net/gh/sae6gnicky/badasseugi@main/Hakgyoansim%20Badasseugi%20TTF%20L.ttf',
+            'https://raw.githubusercontent.com/sae6gnicky/badasseugi/main/Hakgyoansim%20Badasseugi%20TTF%20L.ttf'
+        ];
 
         const state = {
             text: '"어제는 비가 왔다." 그리고 오늘 하늘은 맑다.',
@@ -152,377 +158,21 @@
         let globalDoubleQuoteOpen = false;
         let globalSingleQuoteOpen = false;
 
-        // 기본 폰트를 Base64로 미리 불러와 SVG 및 html2canvas 인쇄 시 깨짐 방지
+        // 기본 폰트를 Base64로 안전하게 불러와 html2canvas 인쇄 시 폰트 누락 방지
         async function loadDefaultFont() {
-            try {
-                const response = await fetch(DEFAULT_FONT_URL);
-                const blob = await response.blob();
-                const reader = new FileReader();
-                reader.onloadend = async () => {
-                    if (!state.customFontData) {
-                        const base64data = reader.result;
-                        const fontCss = `@font-face { font-family: 'Badasseugi'; src: url('${base64data}') format('truetype'); font-weight: normal; font-style: normal; }`;
-                        document.getElementById('dynamic-font-style').innerText = fontCss;
-                        await document.fonts.load('1em Badasseugi');
-                        renderGrid();
-                    }
-                };
-                reader.readAsDataURL(blob);
-            } catch (e) {
-                console.warn('기본 폰트 로드 실패, CSS 폴백 사용:', e);
-                renderGrid();
-            }
-        }
-
-        window.onload = () => {
-            document.getElementById('textInput').value = state.text;
-            renderGrid();
-            loadDefaultFont();
-        };
-
-        document.getElementById('fontUpload').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = async function(event) {
-                state.customFontData = event.target.result;
-                state.fontFamilyName = 'CustomFont';
-                const fontCss = `@font-face { font-family: 'CustomFont'; src: url('${state.customFontData}') format('${file.name.endsWith('woff2') ? 'woff2' : 'truetype'}'); font-weight: normal; font-style: normal; }`;
-                document.getElementById('dynamic-font-style').innerText = fontCss;
-                document.getElementById('fontName').textContent = file.name;
+            for (const url of DEFAULT_FONT_URLS) {
                 try {
-                    await document.fonts.load('1em CustomFont');
-                    setTimeout(renderGrid, 500);
-                } catch(e) { renderGrid(); }
-            };
-            reader.readAsDataURL(file);
-        });
-
-        function analyzeChar(char) {
-            const code = char.charCodeAt(0);
-            if (code >= 0xAC00 && code <= 0xD7A3) {
-                const offset = code - 0xAC00;
-                const jungIdx = Math.floor((offset % 588) / 28);
-                const jongIdx = offset % 28;
-
-                if (jongIdx === 0) {
-                    if (JUNG_RIGHT.includes(jungIdx)) return 'vertical-triangle';
-                    return 'triangle';
-                } else {
-                    if (JONG_DOUBLE.includes(jongIdx)) return 'square';
-                    if (JUNG_BOTTOM.includes(jungIdx) && !JONG_DOUBLE.includes(jongIdx)) return 'diamond';
-                    if (JUNG_RIGHT.includes(jungIdx)) return 'trapezoid-right-long'; 
-                    return 'diamond';
-                }
-            }
-            if (/[A-Za-z0-9]/.test(char)) return 'square';
-            return 'none';
-        }
-
-        function parseTextToCells(paragraph) {
-            const cells = [];
-            cells.push({ char: '', type: 'space', shape: 'none' });
-            // 마침표, 쉼표 단독이거나 그 뒤에 닫는 따옴표가 이어진 뒤 공백이 올 경우 공백 제거 (원고지 규칙)
-            const cleanedPara = paragraph.replace(/([.,][”"’']*)\s+/g, '$1');
-
-            let i = 0;
-            while(i < cleanedPara.length) {
-                const char = cleanedPara[i];
-                if (/[.,]/.test(char)) {
-                    cells.push({ char: char, type: 'symbol', shape: 'none' });
-                } else if (char === '“' || char === '‘') {
-                    cells.push({ char: char, type: 'quote', subType: 'open', shape: 'none' });
-                    if (char === '“') globalDoubleQuoteOpen = true;
-                    if (char === '‘') globalSingleQuoteOpen = true;
-                } else if (char === '”' || char === '’') {
-                    cells.push({ char: char, type: 'quote', subType: 'close', shape: 'none' });
-                    if (char === '”') globalDoubleQuoteOpen = false;
-                    if (char === '’') globalSingleQuoteOpen = false;
-                } else if (char === '"') {
-                    cells.push({ char: char, type: 'quote', subType: globalDoubleQuoteOpen ? 'close' : 'open', shape: 'none' });
-                    globalDoubleQuoteOpen = !globalDoubleQuoteOpen;
-                } else if (char === "'") {
-                    cells.push({ char: char, type: 'quote', subType: globalSingleQuoteOpen ? 'close' : 'open', shape: 'none' });
-                    globalSingleQuoteOpen = !globalSingleQuoteOpen;
-                } else if (char === '!' || char === '?') {
-                    cells.push({ char: char, type: 'full-symbol', shape: 'none' });
-                } else if (char === ' ') {
-                    cells.push({ char: '', type: 'space', shape: 'none' });
-                } else if (/[a-zA-Z0-9]/.test(char)) {
-                    cells.push({ char: char, type: 'half-char', shape: analyzeChar(char) });
-                } else {
-                    cells.push({ char: char, type: 'hangul', shape: analyzeChar(char) });
-                }
-                i++;
-            }
-            return cells;
-        }
-
-        function createNewPage() {
-            const paper = document.createElement('div');
-            paper.className = `print-container landscape page-to-capture`;
-            paper.innerHTML = `
-                <div class="w-full flex justify-between items-end border-b-2 border-slate-800 pb-2 mb-4">
-                    <h2 class="text-2xl font-black text-slate-800 tracking-tight">바른 글씨 연습장</h2>
-                    <div class="flex gap-4 text-[12px] font-bold text-slate-600">
-                        <div class="flex items-center gap-1">번호: <div class="border-b border-slate-300 w-20 h-4"></div></div>
-                        <div class="flex items-center gap-1">이름: <div class="border-b border-slate-300 w-20 h-4"></div></div>
-                    </div>
-                </div>
-                <div class="grid-wrapper w-full" style="border-top: 1.5px solid #b0b8c0; border-left: 1.5px solid #b0b8c0; background: #fff;"></div>
-            `;
-            document.getElementById('mainContent').appendChild(paper);
-            return paper.querySelector('.grid-wrapper');
-        }
-
-        function renderGrid() {
-            const main = document.getElementById('mainContent');
-            main.innerHTML = '';
-            
-            const cols = 15;
-            const maxRowsPerPage = 10;
-            // 격자 크기를 64px로 줄여 하단 여백 확보
-            const size = 64;
-
-            let currentGrid = createNewPage();
-            currentGrid.style.display = 'grid';
-            currentGrid.style.gridTemplateColumns = `repeat(${cols}, ${size}px)`;
-
-            let currentRowCount = 0;
-            globalDoubleQuoteOpen = false;
-            globalSingleQuoteOpen = false;
-
-            const paragraphs = state.text
-                .replace(/([.?!][”'"’]*)\s+/g, "$1\n") 
-                .split('\n')
-                .filter(p => p.trim() !== "");
-
-            paragraphs.forEach(para => {
-                const rawCells = parseTextToCells(para);
-                
-                let processedCells = [];
-                for(let i=0; i < rawCells.length; i++) {
-                    const c = rawCells[i];
-                    const next = rawCells[i+1];
-
-                    // 1. 마침표(.)나 쉼표(,) 뒤에 닫는 따옴표(", ”, ', ’)가 오면 한 칸에 합침
-                    if (c.type === 'symbol' && next && next.type === 'quote' && next.subType === 'close') {
-                        processedCells.push({
-                            type: 'symbol-quote',
-                            chars: [c.char, next.char],
-                            shape: 'none'
-                        });
-                        i++;
-                    }
-                    // 2. 영문/숫자 반 칸 합침 처리
-                    else if (c.type === 'half-char') {
-                        if(next && next.type === 'half-char') {
-                            processedCells.push({ type: 'combined-half', chars: [c, next], shape: 'none' });
-                            i++;
-                        } else {
-                            processedCells.push({ type: 'single-half', charObj: c, shape: 'none' });
-                        }
-                    } else {
-                        processedCells.push(c);
-                    }
-                }
-
-                let finalCells = [];
-                for (let i = 0; i < processedCells.length; i++) {
-                    const c = processedCells[i];
-                    if (finalCells.length % cols === 0 && c.type === 'space' && finalCells.length > 0) continue; 
-                    finalCells.push(c);
-                    if (finalCells.length % cols === 0) {
-                        const next = processedCells[i+1];
-                        if (next && next.type === 'space') {
-                            finalCells[finalCells.length - 1].hasExternalCheck = true;
-                            i++; 
-                        }
-                    }
-                }
-
-                let rows = [];
-                for (let i = 0; i < finalCells.length; i += cols) {
-                    let row = finalCells.slice(i, i + cols);
-                    while (row.length < cols) row.push({ type: 'empty' });
-                    rows.push(row);
-                }
-
-                const renderStep = (showText) => {
-                    rows.forEach(row => {
-                        if (currentRowCount + 1 > maxRowsPerPage) {
-                            currentGrid = createNewPage();
-                            currentGrid.style.display = 'grid';
-                            currentGrid.style.gridTemplateColumns = `repeat(${cols}, ${size}px)`;
-                            currentRowCount = 0;
-                        }
-                        row.forEach(c => currentGrid.appendChild(createCell(c, size, showText)));
-                        currentRowCount++;
+                    const response = await fetch(url);
+                    if (!response.ok) continue;
+                    const buffer = await response.arrayBuffer();
+                    const blob = new Blob([buffer], { type: 'font/ttf' });
+                    
+                    const base64data = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.readAsDataURL(blob);
                     });
-                };
 
-                renderStep(true); 
-                renderStep(false); 
-            });
-        }
-
-        function createCell(data, s, showText) {
-            const cell = document.createElement('div');
-            cell.className = 'relative box-border bg-white overflow-visible';
-            cell.style.width = `${s}px`; cell.style.height = `${s}px`;
-            cell.style.borderRight = '1.5px solid #b0b8c0'; 
-            cell.style.borderBottom = '1.5px solid #b0b8c0';
-
-            const hLine = document.createElement('div'); hLine.className = 'dot-line-h'; cell.appendChild(hLine);
-            const vLine = document.createElement('div'); vLine.className = 'dot-line-v'; cell.appendChild(vLine);
-
-            if (data.hasExternalCheck) {
-                const checkDiv = document.createElement('div');
-                checkDiv.className = 'check-mark-container';
-                const svgNS = "http://www.w3.org/2000/svg";
-                const checkSvg = document.createElementNS(svgNS, "svg");
-                checkSvg.setAttribute("viewBox", "0 0 100 100");
-                const path = document.createElementNS(svgNS, "path");
-                path.setAttribute("d", "M20,50 L45,75 L85,25");
-                path.setAttribute("fill", "none");
-                path.setAttribute("stroke", "#f97316"); 
-                path.setAttribute("stroke-width", "10");
-                path.setAttribute("stroke-linecap", "round");
-                checkSvg.appendChild(path);
-                checkDiv.appendChild(checkSvg);
-                cell.appendChild(checkDiv);
-            }
-
-            const svgNS = "http://www.w3.org/2000/svg";
-            const svg = document.createElementNS(svgNS, "svg");
-            svg.setAttribute("viewBox", "0 0 100 100");
-            svg.classList.add("shape-svg");
-            
-            const style = document.createElementNS(svgNS, "style");
-            const fontRule = document.getElementById('dynamic-font-style').innerText;
-            style.textContent = `
-                ${fontRule}
-                .svg-practice-text { font-family: '${state.fontFamilyName}', 'Noto Sans KR', sans-serif !important; }
-            `;
-            svg.appendChild(style);
-
-            const drawShape = (shapeType, container, customXOffset = 0, isHalf = false) => {
-                if (!shapeType || shapeType === 'none') return;
-                const path = document.createElementNS(svgNS, "path");
-                path.setAttribute("fill", "none");
-                path.setAttribute("stroke", "#ccfbf1");
-                path.setAttribute("stroke-width", isHalf ? "2.4" : "1.2");
-                let d = "";
-                const m = 4; const e = 96; const mid = 50;
-
-                if (shapeType === 'vertical-triangle') {
-                    d = `M${m},${mid} L${e},${m} L${e},${e} Z`;
-                } else if (shapeType === 'triangle') {
-                    d = `M${mid},${m} L${e},${e} L${m},${e} Z`;
-                } else if (shapeType === 'diamond') {
-                    d = `M${mid},${m} L${e},${mid} L${mid},${e} L${m},${mid} Z`;
-                } else if (shapeType === 'trapezoid-right-long') {
-                    d = `M${m},${m+15} L${e},${m} L${e},${e} L${m},${e-15} Z`;
-                } else if (shapeType === 'square') {
-                    const sqM = 8; const sqE = 92;
-                    d = `M${sqM},${sqM} H${sqE} V${sqE} H${sqM} Z`;
-                }
-                
-                path.setAttribute("d", d);
-                if(isHalf) path.setAttribute("transform", `translate(${customXOffset === 0 ? -25 : 25}, 0) scale(0.5, 1)`);
-                container.appendChild(path);
-            };
-
-            const drawText = (char, container, x="50", y="52", fontSize="85", isHalf=false) => {
-                if(!showText || !char) return;
-                const text = document.createElementNS(svgNS, "text");
-                text.textContent = char;
-                text.classList.add("svg-practice-text");
-                text.setAttribute("x", x);
-                text.setAttribute("y", y);
-                text.setAttribute("font-size", fontSize);
-                if(isHalf) text.setAttribute("transform", `scale(0.8, 1) translate(${(parseFloat(x)-50)*0.25}, 0)`);
-                container.appendChild(text);
-            };
-
-            if (data.type === 'symbol-quote') {
-                // 한 칸에 마침표(왼쪽 아래 반 칸) + 닫는 따옴표(오른쪽 위 반 칸) 함께 배치
-                drawText(data.chars[0], svg, "25", "75", "85");
-                drawText(data.chars[1], svg, "70", "40", "70");
-            } else if (data.type === 'combined-half') {
-                drawShape(data.chars[0].shape, svg, 0, true);
-                drawShape(data.chars[1].shape, svg, 50, true);
-                drawText(data.chars[0].char, svg, "25", "52", "75", true);
-                drawText(data.chars[1].char, svg, "75", "52", "75", true);
-            } else if (data.type === 'single-half') {
-                drawShape(data.charObj.shape, svg, 0, true);
-                drawText(data.charObj.char, svg, "25", "52", "75", true);
-            } else if (data.type !== 'empty') {
-                drawShape(data.shape, svg);
-                if (data.char) {
-                    let x="50", y="52", fs="85";
-                    if (data.type === 'quote') { fs="70"; y="40"; x=data.subType === 'open' ? "70" : "30"; }
-                    else if (data.type === 'symbol') { x="25"; y="75"; }
-                    drawText(data.char, svg, x, y, fs);
-                }
-            }
-            
-            cell.appendChild(svg);
-            return cell;
-        }
-
-        async function exportToImage() {
-            const loading = document.getElementById('loading-overlay');
-            loading.style.display = 'flex';
-            await document.fonts.ready;
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            try {
-                const pages = document.querySelectorAll('.page-to-capture');
-                const images = [];
-                for (const page of pages) {
-                    const canvas = await html2canvas(page, { 
-                        scale: 3, 
-                        useCORS: true, 
-                        allowTaint: true, 
-                        backgroundColor: '#ffffff', 
-                        logging: false,
-                        onclone: (clonedDoc) => {
-                            const style = clonedDoc.createElement('style');
-                            style.innerText = document.getElementById('dynamic-font-style').innerText;
-                            clonedDoc.head.appendChild(style);
-                        }
-                    });
-                    images.push(canvas.toDataURL('image/png'));
-                }
-                const printWindow = window.open('', '_blank');
-                printWindow.document.write(`
-                    <html>
-                    <head>
-                        <title>바른 글씨 연습장 인쇄 미리보기</title>
-                        <style>
-                            @page { size: A4 landscape; margin: 0; }
-                            body { margin: 0; background: #525659; display: flex; flex-direction: column; align-items: center; padding: 40px 0; font-family: sans-serif; }
-                            .page-img { background: white; box-shadow: 0 0 20px rgba(0,0,0,0.3); margin-bottom: 20px; width: 297mm; display: block; }
-                            .controls { position: fixed; top: 20px; right: 20px; z-index: 100; background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
-                            button { padding: 12px 24px; background: #0d9488; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-                            @media print { 
-                                .controls { display: none; } 
-                                body { background: none; padding: 0; }
-                                .page-img { box-shadow: none; margin: 0; width: 100%; height: auto; page-break-after: always; display: block; } 
-                            }
-                        </style>
-                    </head>
-                    <body>
-                        <div class="controls"><button onclick="window.print()">인쇄 / PDF 저장</button></div>
-                        ${images.map(img => `<img src="${img}" class="page-img">`).join('')}
-                    </body></html>
-                `);
-                printWindow.document.close();
-            } catch (err) { alert("이미지 생성 중 오류가 발생했습니다."); }
-            finally { loading.style.display = 'none'; }
-        }
-
-        document.getElementById('textInput').addEventListener('input', (e) => { state.text = e.target.value; renderGrid(); });
-    </script>
-</body>
-</html>
+                    if (!state.customFontData) {
+                        document.getElementById('dynamic-font-style').innerText = `
+                            @font-face {
